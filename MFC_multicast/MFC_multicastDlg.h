@@ -17,6 +17,7 @@ public:
 	SOCKET socketMC;
 	SOCKET sock;
 	SOCKET socketMsg;
+	SOCKET socketFile;
 	struct sockaddr_in localaddr;
 	struct sockaddr_in remote;
 	char hostname[128];
@@ -27,10 +28,10 @@ public:
 	CMFCmulticastDlg(CWnd* pParent = nullptr);	// 标准构造函数
 	void AddList(sockaddr_in);
 	BOOL UDPMulticast();
-	BOOL CreateServer();
+	BOOL CreateMsgServer();
 	BOOL SendMC(char);	//发送组播
-	BOOL CreateFServer(char *);
-	BOOL CreateFClient(char *, sockaddr_in);
+	BOOL CreateFServer();
+	BOOL recFile(char *, SOCKET);
 // 对话框数据
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_MFC_MULTICAST_DIALOG };
@@ -44,6 +45,7 @@ protected:
 	// 套接字通知事件
 	afx_msg long OnSocketMC(WPARAM wParam, LPARAM lParam);
 	afx_msg long OnSocketMSG(WPARAM wParam, LPARAM lParam);
+	afx_msg long CMFCmulticastDlg::OnSocketFIle(WPARAM wParam, LPARAM lParam);
 	virtual void OnCancel();
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
