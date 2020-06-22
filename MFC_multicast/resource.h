@@ -16,7 +16,7 @@
 #define IDC_BUTTON_FLUSH                1007
 #define MSGPORT                         8568
 #define FILEPORT                        8589
-#define MCASTPORT                       12345
+#define MCASTPORT                       9800
 
 // Next default values for new objects
 // 

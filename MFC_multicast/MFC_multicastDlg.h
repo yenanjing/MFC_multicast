@@ -15,16 +15,14 @@ public:
 	CEdit mEditLog;
 	CArray<sockaddr_in, sockaddr_in&> s_List;
 	SOCKET socketMC;
-	SOCKET sock;
 	SOCKET socketMsg;
 	SOCKET socketFile;
 	struct sockaddr_in localaddr;
 	struct sockaddr_in remote;
 	char hostname[128];
 	struct hostent*pHost;
-
+	char fileName[100];
 	CString mLogStr;
-	CString mInputStr;
 	CMFCmulticastDlg(CWnd* pParent = nullptr);	// 标准构造函数
 	void AddList(sockaddr_in);
 	BOOL UDPMulticast();
@@ -43,9 +41,9 @@ protected:
 	//virtual void OnCancel();
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 	// 套接字通知事件
-	afx_msg long OnSocketMC(WPARAM wParam, LPARAM lParam);
-	afx_msg long OnSocketMSG(WPARAM wParam, LPARAM lParam);
-	afx_msg long CMFCmulticastDlg::OnSocketFIle(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSocketMC(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSocketMSG(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSocketFILE(WPARAM wParam, LPARAM lParam);
 	virtual void OnCancel();
 	// 生成的消息映射函数
 	virtual BOOL OnInitDialog();
@@ -57,4 +55,5 @@ public:
 	afx_msg void OnBnClickedButtonMsg();
 	afx_msg void OnBnClickedButtonFile();
 	afx_msg void OnBnClickedButtonFlush();
+	CString mInputStr;
 };

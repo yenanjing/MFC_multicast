@@ -6,12 +6,12 @@
 #include "MFC_multicast.h"
 #include "MFC_multicastDlg.h"
 #include "afxdialogex.h"
-
+#include  <string>
 // 定义网络事件通知消息
 #define WM_SOCKET_MC WM_USER + 101
 #define WM_SOCKET_MSG WM_USER + 102
 #define WM_SOCKET_FILE WM_USER + 103
-#define BUFFER_SIZE 512
+#define BUFFER_SIZE 1024
 #define MCASTADDR "236.0.0.1"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -25,12 +25,12 @@ class CAboutDlg : public CDialogEx
 public:
 	CAboutDlg();
 
-// 对话框数据
+	// 对话框数据
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_ABOUTBOX };
 #endif
 
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 支持
 
 // 实现
@@ -56,8 +56,9 @@ END_MESSAGE_MAP()
 
 
 CMFCmulticastDlg::CMFCmulticastDlg(CWnd* pParent /*=nullptr*/)
-	: CDialogEx(IDD_MFC_MULTICAST_DIALOG, pParent), mInputStr(_T(""))
+	: CDialogEx(IDD_MFC_MULTICAST_DIALOG, pParent)
 	, mLogStr(_T(""))
+	, mInputStr(_T(""))
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -65,16 +66,19 @@ CMFCmulticastDlg::CMFCmulticastDlg(CWnd* pParent /*=nullptr*/)
 void CMFCmulticastDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
-	DDX_Text(pDX, IDC_EDIT_INPUT, mInputStr);
-	DDV_MaxChars(pDX, mInputStr, 500);
 	DDX_Text(pDX, IDC_EDIT_LOG, mLogStr);
 	DDV_MaxChars(pDX, mLogStr, 10000);
+	DDX_Text(pDX, IDC_EDIT_INPUT, mInputStr);
+	DDV_MaxChars(pDX, mInputStr, 500);
 }
 
 BEGIN_MESSAGE_MAP(CMFCmulticastDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
+	ON_MESSAGE(WM_SOCKET_MC, OnSocketMC)
+	ON_MESSAGE(WM_SOCKET_MSG, OnSocketMSG)
+	ON_MESSAGE(WM_SOCKET_FILE, OnSocketFILE)
 	ON_BN_CLICKED(IDC_BUTTON_MSG, &CMFCmulticastDlg::OnBnClickedButtonMsg)
 	ON_BN_CLICKED(IDC_BUTTON_FILE, &CMFCmulticastDlg::OnBnClickedButtonFile)
 	ON_BN_CLICKED(IDC_BUTTON_FLUSH, &CMFCmulticastDlg::OnBnClickedButtonFlush)
@@ -94,15 +98,16 @@ BOOL CMFCmulticastDlg::OnInitDialog()
 	lStyle |= LVS_REPORT; //设置style
 	SetWindowLong(mListHost.m_hWnd, GWL_STYLE, lStyle);//设置style
 	mListHost.SetExtendedStyle(LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES/*|LVS_EX_CHECKBOXES*/); //设置扩展风格
-	mListHost.InsertColumn(0,head,LVCFMT_LEFT,175);//插入列
+	mListHost.InsertColumn(0, head, LVCFMT_LEFT, 175);//插入列
 	if (gethostname(hostname, 128) != 0) {
 		CString msg = _T("获取用户名失败");
 		::AfxMessageBox(msg);
 	}
 	pHost = gethostbyname(hostname);
+	socketMC = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	UDPMulticast();	//初始化组播网络发现
 	SendMC('J');	//发送组播消息,J取"JOIN"
-	if (!(CreateMsgServer()&&CreateFServer())) {
+	if (!(CreateMsgServer() && CreateFServer())) {
 		::AfxMessageBox(_T("初始化失败"));
 	}
 	// 将“关于...”菜单项添加到系统菜单中。
@@ -149,53 +154,53 @@ BOOL CMFCmulticastDlg::UDPMulticast() {
 		return 0;
 	}
 	int ret;
-	if ((sock = WSASocket(AF_INET, SOCK_DGRAM, 0, NULL, 0, WSA_FLAG_MULTIPOINT_C_LEAF | WSA_FLAG_MULTIPOINT_D_LEAF |
-		WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
-
-		printf("socket failed with:%d\n", WSAGetLastError());
-		WSACleanup();
-		return -1;
-	}
-	struct sockaddr_in local;
+	sockaddr_in local;
 	local.sin_family = AF_INET;
 	local.sin_port = htons(MCASTPORT);
-	local.sin_addr.S_un.S_addr = INADDR_ANY;
-	if (bind(sock, (struct sockaddr *)&local, sizeof(local)) == SOCKET_ERROR) {
-		printf("bind failed with :%d \n", WSAGetLastError());
-		closesocket(sock);
+	local.sin_addr.s_addr = INADDR_ANY;
+	memset(local.sin_zero, 0, 8);
+	if (bind(socketMC, (struct sockaddr *)&local, sizeof(local)) == SOCKET_ERROR) {
+		printf("123bind failed with :%d \n", WSAGetLastError());
+		closesocket(socketMC);
 		WSACleanup();
 		return -1;
 	}
 	//加入组播
-	ret = ::WSAAsyncSelect(socketMC, m_hWnd, WM_SOCKET_MC, FD_READ | FD_CLOSE);	//设置异步模式
+	ret = WSAAsyncSelect(socketMC, m_hWnd, WM_SOCKET_MC, FD_READ | FD_CLOSE);	//设置异步模式
 	if (ret == SOCKET_ERROR) return FALSE;
+	ip_mreq mreq;
+	memset(&mreq, 0, sizeof(struct ip_mreq));
+	mreq.imr_multiaddr.S_un.S_addr = inet_addr(MCASTADDR);    //组播源地址
+	mreq.imr_interface.S_un.S_addr = inet_addr(inet_ntoa(*(struct in_addr*)pHost->h_addr_list[0]));       //本地地址
+	int m = setsockopt(socketMC, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(struct ip_mreq));
+	if (m == SOCKET_ERROR) return FALSE;
+	//在 IP 头中设置出局多点广播数据报的“有效时间”（TTL）
+	int optval = 64;
+	setsockopt(socketMC, IPPROTO_IP, IP_MULTICAST_TTL, (char*)&optval, sizeof(int));
+	//指定当发送主机是多点广播组的成员时，是否将出局多点广播数据报的副本传送至发送主机
+	int loop = 0;
+	setsockopt(socketMC, IPPROTO_IP, IP_MULTICAST_LOOP, (char*)&loop, sizeof(int));
 	remote.sin_family = AF_INET;
 	remote.sin_port = htons(MCASTPORT);
 	remote.sin_addr.s_addr = inet_addr(MCASTADDR);
-	if ((socketMC = WSAJoinLeaf(sock, (SOCKADDR *)&remote, sizeof(remote), NULL, NULL, NULL, NULL, JL_BOTH)) == INVALID_SOCKET) {
-		printf("WSAJoinLeaf() failed : %d\n", WSAGetLastError());
-		closesocket(sock);
-		WSACleanup();
-		return -1;
-	}
-
+	memset(remote.sin_zero, 0, 8);
 	return 1;
 }
 //发送组播
 BOOL CMFCmulticastDlg::SendMC(char c) {
 	char buff[2] = { c, '\0' };		//组播网络发现标识
-	int ret = sendto(sock, buff, 2, 0, (struct sockaddr*)&remote, sizeof(remote));
+	int ret = sendto(socketMC, (char*)buff, 2, 0, (struct sockaddr*)&remote, sizeof(remote));
 	std::cout << ret << std::endl;
-	return ret== 2 ? TRUE : FALSE;
-}
-BOOL CMFCmulticastDlg::CreateMsgServer() {
-	if ((socketMsg = WSASocket(AF_INET, SOCK_DGRAM, 0, NULL, 0, WSA_FLAG_MULTIPOINT_C_LEAF | WSA_FLAG_MULTIPOINT_D_LEAF |
-		WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
-
+	if (ret < 0)
+	{
 		printf("socket failed with:%d\n", WSAGetLastError());
-		WSACleanup();
-		return -1;
 	}
+	return ret == 2 ? TRUE : FALSE;
+}
+
+BOOL CMFCmulticastDlg::CreateMsgServer() {
+	socketMsg = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (socketMsg == INVALID_SOCKET) return FALSE;
 	localaddr.sin_family = AF_INET;
 	localaddr.sin_port = htons(MSGPORT);
 	localaddr.sin_addr.S_un.S_addr = INADDR_ANY;
@@ -203,13 +208,58 @@ BOOL CMFCmulticastDlg::CreateMsgServer() {
 	if (bind(socketMsg, (struct sockaddr *)&localaddr, sizeof(localaddr)) == SOCKET_ERROR) return FALSE;
 	//设置异步模式
 	if (::WSAAsyncSelect(socketMsg, m_hWnd, WM_SOCKET_MSG, FD_READ | FD_CLOSE) == SOCKET_ERROR) return FALSE;
+	ip_mreq mreq;
+	memset(&mreq, 0, sizeof(struct ip_mreq));
+	mreq.imr_multiaddr.S_un.S_addr = inet_addr(MCASTADDR);    //组播源地址
+	mreq.imr_interface.S_un.S_addr = inet_addr(inet_ntoa(*(struct in_addr*)pHost->h_addr_list[0]));       //本地地址
+	int m = setsockopt(socketMsg, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(struct ip_mreq));
+	if (m == SOCKET_ERROR) return FALSE;
+	//在 IP 头中设置出局多点广播数据报的“有效时间”（TTL）
+	int optval = 64;
+	setsockopt(socketMsg, IPPROTO_IP, IP_MULTICAST_TTL, (char*)&optval, sizeof(int));
+	//指定当发送主机是多点广播组的成员时，是否将出局多点广播数据报的副本传送至发送主机
+	int loop = 0;
+	setsockopt(socketMsg, IPPROTO_IP, IP_MULTICAST_LOOP, (char*)&loop, sizeof(int));
 	return TRUE;
 }
-long CMFCmulticastDlg::OnSocketMC(WPARAM wParam, LPARAM lParam) {
+
+BOOL CMFCmulticastDlg::CreateFServer() {
+	struct sockaddr_in server_addr;
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.S_un.S_addr = INADDR_ANY;
+	server_addr.sin_port = htons(FILEPORT);
+
+	// 创建socket 
+	socketFile = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (socketFile == INVALID_SOCKET) return FALSE;
+	//绑定socket和服务端(本地)地址 
+	if (SOCKET_ERROR == bind(socketFile, (LPSOCKADDR)&server_addr, sizeof(server_addr)))
+	{
+		::AfxMessageBox(_T("Server Bind Failed: ") + WSAGetLastError());
+		return 0;
+	}
+	if (::WSAAsyncSelect(socketFile, m_hWnd, WM_SOCKET_FILE, FD_READ | FD_CLOSE) == SOCKET_ERROR) return FALSE;
+	ip_mreq mreq;
+	memset(&mreq, 0, sizeof(struct ip_mreq));
+	mreq.imr_multiaddr.S_un.S_addr = inet_addr(MCASTADDR);    //组播源地址
+	mreq.imr_interface.S_un.S_addr = inet_addr(inet_ntoa(*(struct in_addr*)pHost->h_addr_list[0]));       //本地地址
+	int m = setsockopt(socketFile, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(struct ip_mreq));
+	if (m == SOCKET_ERROR) return FALSE;
+	//在 IP 头中设置出局多点广播数据报的“有效时间”（TTL）
+	int optval = 64;
+	setsockopt(socketFile, IPPROTO_IP, IP_MULTICAST_TTL, (char*)&optval, sizeof(int));
+	//指定当发送主机是多点广播组的成员时，是否将出局多点广播数据报的副本传送至发送主机
+	int loop = 0;
+	setsockopt(socketFile, IPPROTO_IP, IP_MULTICAST_LOOP, (char*)&loop, sizeof(int));
+	return 1;
+}
+
+LRESULT CMFCmulticastDlg::OnSocketMC(WPARAM wParam, LPARAM lParam) {
 	SOCKET s = wParam;
+	std::cout << "收到控制信息" << std::endl;
 	if (WSAGETSELECTERROR(lParam)) {
 		::closesocket(s);
-		return 0;//TODO
+		return 0;
 	}
 	switch (WSAGETSELECTEVENT(lParam)) {
 	case FD_READ:
@@ -222,13 +272,14 @@ long CMFCmulticastDlg::OnSocketMC(WPARAM wParam, LPARAM lParam) {
 			::closesocket(s);
 			break;
 		}
+		std::cout << recv << std::endl;
 		if (recv[0] == 'R' || recv[0] == 'J') {
 			AddList(from);	//将IP加入列表中
 		}
 		if (recv[0] == 'J') {
 			//JOIN,发送回应RESPONSE
 			char buffT[2] = { 'R', '\0' };
-			::sendto(s, buffT, strlen(buffT), 0, (struct sockaddr*)&from, fromlen);
+			SendMC('R');
 		}
 		else if (recv[0] == 'Q') {	//Quit退出，删除对应IP
 			for (int i = 0; i < s_List.GetCount(); i++) {
@@ -248,8 +299,9 @@ long CMFCmulticastDlg::OnSocketMC(WPARAM wParam, LPARAM lParam) {
 
 	return 0;
 }
-long CMFCmulticastDlg::OnSocketMSG(WPARAM wParam, LPARAM lParam) {
+LRESULT  CMFCmulticastDlg::OnSocketMSG(WPARAM wParam, LPARAM lParam) {
 	SOCKET s = wParam;
+	std::cout << "收到消息数据" << std::endl;
 	if (WSAGETSELECTERROR(lParam)) {
 		::closesocket(s);
 		return 0;//TODO
@@ -281,12 +333,13 @@ long CMFCmulticastDlg::OnSocketMSG(WPARAM wParam, LPARAM lParam) {
 	}
 	return 0;
 }
-long CMFCmulticastDlg::OnSocketFIle(WPARAM wParam, LPARAM lParam)
+LRESULT CMFCmulticastDlg::OnSocketFILE(WPARAM wParam, LPARAM lParam)
 {
+	std::cout << "收到文件数据" << std::endl;
 	SOCKET s = wParam;
 	if (WSAGETSELECTERROR(lParam)) {
 		::closesocket(s);
-		return 0;//TODO
+		return 0;
 	}
 	switch (WSAGETSELECTEVENT(lParam)) {
 	case FD_READ:
@@ -296,8 +349,9 @@ long CMFCmulticastDlg::OnSocketFIle(WPARAM wParam, LPARAM lParam)
 		int fromlen = sizeof(from);
 		char recv[BUFFER_SIZE];
 		memset(recv, 0, sizeof(char) * BUFFER_SIZE);
-		if (::recvfrom(s, recv, sizeof(recv), 0, (struct sockaddr*)&from, &fromlen) == -1) {
-			::closesocket(s);
+		int length = recvfrom(s, recv, sizeof(recv), 0, (struct sockaddr*)&from, &fromlen);
+		if (length == -1) {
+			printf("receive from failed with:%d\n", WSAGetLastError());
 			break;
 		}
 		CString e(recv);
@@ -308,26 +362,49 @@ long CMFCmulticastDlg::OnSocketFIle(WPARAM wParam, LPARAM lParam)
 		{
 			CString s2 = e.Right(e.GetLength() - n - 1);
 			::AfxMessageBox(s2);
-			char fileName[100] = "";
 			OPENFILENAME file = { 0 };
 			file.lStructSize = sizeof(file);
-			file.lpstrFile = (LPWSTR)fileName;
+			file.lpstrFile = fileName;
 			file.nMaxFile = 100;
-			file.lpstrFilter = (LPCWSTR)"All Files(*.*)\0*.*\0\0";
+			file.lpstrFilter = "All Files(*.*)\0*.*\0\0";
 			file.nFilterIndex = 1;
 			if (!::GetSaveFileName(&file))
 			{
 				std::cout << "获取保存文件名失败" << std::endl;
 				return 0;
 			}
-			recFile(fileName, s);
+			if (mLogStr.GetLength() + 300 > 10000)
+				mLogStr.Delete(0, 300);
+			mLogStr += s2; mLogStr += "\r\n\r\n";
 		}
-		if (mLogStr.GetLength() + 300 > 10000)
-			mLogStr.Delete(0, 300);
-		mLogStr += "[";					//接收消息并且更新Log
-		mLogStr += inet_ntoa(from.sin_addr);
-		mLogStr += "]说：\r\n	";
-		mLogStr += recv; mLogStr += "\r\n\r\n";
+		else {
+			int flag = 0;
+			FILE * fp = fopen(fileName, "ab"); //注意是ab，追加在末尾
+			if (NULL == fp)
+			{
+				::AfxMessageBox(_T("File:  Can Not Open To Write\n"));
+			}
+			else
+			{
+				if (strcmp(recv, "QUIT") == 0)
+				{
+					std::cout << "结束" << std::endl;
+					flag = 1;
+				}
+				else
+				{
+					if (fwrite(recv, sizeof(char), length, fp) < length)
+					{
+						::AfxMessageBox(_T("File:  Write Failed\n"));
+						fclose(fp);
+						return 0;
+					}
+				}
+			}
+			if (flag == 1)
+				::AfxMessageBox(_T("Receive File:  From client Successful!\n"));
+			fclose(fp);
+		}
 		UpdateData(FALSE);
 	}
 	break;
@@ -390,20 +467,18 @@ HCURSOR CMFCmulticastDlg::OnQueryDragIcon()
 
 void CMFCmulticastDlg::OnBnClickedButtonMsg()
 {
-	if (mListHost.GetFirstSelectedItemPosition() == NULL) return;
 	//获取输入框文本
 	UpdateData();
-	CString s ("你");
-	char* buff = (LPSTR)(LPCTSTR)mInputStr;
-	int len = mInputStr.GetLength();
+	CString s("你");
 	struct sockaddr_in remoteT;
 	remoteT.sin_addr.s_addr = inet_addr(MCASTADDR);
 	remoteT.sin_family = AF_INET;
 	remoteT.sin_port = htons(MSGPORT);
-	int ret = sendto(socketMsg, buff, len, 0, (struct sockaddr*)&remoteT, sizeof(remoteT));
+	char* buff = (LPSTR)(LPCTSTR)mInputStr;
+	int ret = sendto(socketMsg, buff, strlen(buff), 0, (struct sockaddr*)&remoteT, sizeof(remoteT));
 	//发消息
-	if(ret<=0)
-		std::cout<<"消息发送失败"<<std::endl;
+	if (ret <= 0)
+		std::cout << "消息发送失败" << std::endl;
 	s += "说：\r\n	";
 	if (mLogStr.GetLength() + s.GetLength() > 10000)
 		mLogStr.Delete(0, s.GetLength());
@@ -419,23 +494,24 @@ void CMFCmulticastDlg::OnBnClickedButtonFile()
 	char fileName[100] = "";
 	OPENFILENAME file = { 0 };
 	file.lStructSize = sizeof(file);
-	file.lpstrFile = (LPWSTR)fileName;
+	file.lpstrFile = fileName;
 	file.nMaxFile = 100;
-	file.lpstrFilter = (LPWSTR)"All Files(*.*)\0*.*\0\0";
+	file.lpstrFilter = "All Files(*.*)\0*.*\0\0";
 	file.nFilterIndex = 1;
 	if (!::GetOpenFileName(&file)) {
 		::AfxMessageBox(_T("选择文件失败!"));
+		printf("error\n");
 		return;
 	}
 	CString buff("sendfile:");
 	buff += inet_ntoa(*(struct in_addr*)pHost->h_addr_list[0]);
-	buff += "向你发送文件 "; buff += fileName;
+	buff += "发送文件 "; buff += fileName;
 	int len = buff.GetLength();
 	struct sockaddr_in remoteT;
 	remoteT.sin_addr.s_addr = inet_addr(MCASTADDR);
 	remoteT.sin_family = AF_INET;
 	remoteT.sin_port = htons(FILEPORT);
-	char *buffer = (char*)(LPCTSTR)buff;
+	char *buffer = (LPSTR)(LPCTSTR)buff;
 	int ret = sendto(socketFile, buffer, len, 0, (struct sockaddr*)&remoteT, sizeof(remoteT));//传输文件名
 	if (ret <= 0)
 	{
@@ -453,14 +529,15 @@ void CMFCmulticastDlg::OnBnClickedButtonFile()
 	{
 		memset(buffer2, 0, BUFFER_SIZE);
 		int length = 0;
-		while ((length = fread(buffer2, sizeof(char), BUFFER_SIZE, fp)) > 0)
+		while ((length = fread(buffer2, 1, BUFFER_SIZE, fp)) > 0)
 		{
-			if (sendto(socketFile, (char *)buffer2, strlen(buffer2), 0, (struct sockaddr *) &remoteT, sizeof(remoteT)) < 0)
+			if (sendto(socketFile, (char *)buffer2, length, 0, (struct sockaddr *) &remoteT, sizeof(remoteT)) < 0)
 			{
-				::AfxMessageBox(_T("Send File:  Failed\n")); closesocket(socketFile);
+				::AfxMessageBox(_T("Send File:  Failed\n")); 
 				return;
 			}
 			memset(buffer2, 0, BUFFER_SIZE);
+			Sleep(100);
 		}
 		fclose(fp);
 		char sendbuf[10];
@@ -469,81 +546,10 @@ void CMFCmulticastDlg::OnBnClickedButtonFile()
 		sendbuf[2] = 'I';
 		sendbuf[3] = 'T';
 		sendbuf[4] = '\0';
-		sendto(socketFile, (char *)sendbuf, strlen(sendbuf), 0, (struct sockaddr *) &remoteT, sizeof(remoteT));
-		closesocket(socketFile);
+		sendto(socketFile, (char *)sendbuf, 5, 0, (struct sockaddr *) &remoteT, sizeof(remoteT));
 	}
 	::AfxMessageBox(_T("File:  Transfer Successful!\n"));
 	return;
-}
-BOOL CMFCmulticastDlg::CreateFServer() {
-	struct sockaddr_in server_addr;
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.S_un.S_addr = INADDR_ANY;
-	server_addr.sin_port = htons(FILEPORT);
-
-	// 创建socket 
-	if ((socketFile = WSASocket(AF_INET, SOCK_DGRAM, 0, NULL, 0, WSA_FLAG_MULTIPOINT_C_LEAF | WSA_FLAG_MULTIPOINT_D_LEAF |
-		WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
-
-		printf("socket failed with:%d\n", WSAGetLastError());
-		WSACleanup();
-		return -1;
-	}
-	//绑定socket和服务端(本地)地址 
-	if (SOCKET_ERROR == bind(socketFile, (LPSOCKADDR)&server_addr, sizeof(server_addr)))
-	{
-		::AfxMessageBox(_T("Server Bind Failed: ") + WSAGetLastError());
-		return 0;
-	}
-	if (::WSAAsyncSelect(socketFile, m_hWnd, WM_SOCKET_FILE, FD_READ | FD_CLOSE) == SOCKET_ERROR) return FALSE;
-	return 1;
-}
-BOOL CMFCmulticastDlg::recFile(char * file_name, SOCKET s) {
-	//指定服务端的地址 
-	SOCKET n = s;
-	struct sockaddr_in from;
-	int flag = 0;
-	int len = sizeof(struct sockaddr_in);
-	char buffer[BUFFER_SIZE];
-	FILE * fp = fopen(file_name, "wb"); //windows下是"wb",表示打开一个只写的二进制文件 
-	if (NULL == fp)
-	{
-		::AfxMessageBox(_T("File:  Can Not Open To Write\n"));
-	}
-	else
-	{
-		memset(buffer, 0, BUFFER_SIZE);
-		int length = 0;
-		
-		while ((length = recvfrom(n, buffer, BUFFER_SIZE,0, (struct sockaddr *)&from, &len)) > 0)
-		{
-			if (length < 0)
-			{
-				printf("recvfrom failed with: %d\n", WSAGetLastError());
-				closesocket(n);
-				break;
-			}
-			if (strcmp(buffer, "QUIT") == 0)
-			{
-				std::cout << "结束" << std::endl;
-				flag = 1;
-				break;
-			}
-			if (fwrite(buffer, sizeof(char), length, fp) < length)
-			{
-				::AfxMessageBox(_T("File:  Write Failed\n"));
-				fclose(fp);
-				closesocket(n);
-				return 0;
-			}
-			memset(buffer, 0, BUFFER_SIZE);
-		}
-	}
-	if(flag==1)
-	::AfxMessageBox(_T("Receive File:  From client Successful!\n"));
-	fclose(fp);
-	closesocket(n);
-	return 1;
 }
 
 void CMFCmulticastDlg::OnBnClickedButtonFlush()
@@ -564,6 +570,8 @@ void CMFCmulticastDlg::OnCancel()
 		::closesocket(socketMC);
 	if (socketMsg != INVALID_SOCKET)
 		::closesocket(socketMsg);
+	if (socketFile != INVALID_SOCKET)
+		::closesocket(socketFile);
 	::WSACleanup();
 	CDialog::OnCancel();
 }
