@@ -3,8 +3,8 @@
 
 A simple chat room in LAN implemented by MFC and multicast. It can send message and file to all members in multiscast group.
 
-***If you want to run this project on VS2017, you need to change the character set from Unicode(default) to multibyte character set.
-If you want to output the debug information, please open the project property and input "editbin /SUBSYSTEM:CONSOLE $(OUTDIR)\$(ProjectName).exe" in the command iine from the event generating.***
+***If you want to run this project on VS2017, you need to change the character set from Unicode(default) to multibyte character set.***
+***If you want to output the debug information, please open the project property and input "editbin /SUBSYSTEM:CONSOLE $(OUTDIR)\$(ProjectName).exe" in the command iine from the event generating.***
 
 ## Design ideas:
 1.Considering the need for interface interaction, MFC was chosen to implement. For different data function transmission, I mainly use three non-blocking sockets to realize the functions of managing group, text transmission and file transmission respectively. Of course, you can also use a blocking socket to accept different types of data by adding flag bits to it, and depending on the flag bits, you can also use the socket to accept. I will introduce my code logic and design ideas from the use of three sockets.
